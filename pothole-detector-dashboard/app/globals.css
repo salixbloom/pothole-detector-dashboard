@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/* ── Text size scaling ─────────────────────────────────────────────────────── */
+/* Tailwind uses rem-based sizes, so setting font-size on html scales everything */
+html[data-text-size="sm"] { font-size: 13px; }
+html[data-text-size="md"] { font-size: 16px; }
+html[data-text-size="lg"] { font-size: 19px; }
+html[data-text-size="xl"] { font-size: 22px; }
+
+/* ── Light theme ───────────────────────────────────────────────────────────── */
+/* Override Tailwind v4 CSS variables so all utilities using var(--color-*) flip */
+html[data-theme="light"] {
+  color-scheme: light;
+
+  /* Flip zinc scale: dark values become light equivalents */
+  --color-zinc-950: oklch(98.5% 0 0);              /* was zinc-50  */
+  --color-zinc-900: oklch(96.7% 0.001 286.375);    /* was zinc-100 */
+  --color-zinc-800: oklch(92% 0.004 286.32);       /* was zinc-200 */
+  --color-zinc-700: oklch(87.1% 0.006 286.286);    /* was zinc-300 */
+  --color-zinc-600: oklch(55.2% 0.016 285.938);    /* zinc-500 — mid-tone stays */
+  --color-zinc-500: oklch(55.2% 0.016 285.938);    /* zinc-500 */
+  --color-zinc-400: oklch(44.2% 0.017 285.786);    /* zinc-600 — darker for contrast on light bg */
+  --color-zinc-300: oklch(37% 0.013 285.805);      /* zinc-700 */
+  --color-white:    oklch(14.1% 0.005 285.823);    /* zinc-950 — invert: white text becomes near-black */
+
+  /* Status badge backgrounds — invert to light tints */
+  --color-red-900:   oklch(97.1% 0.013 17.38);     /* red-50   */
+  --color-green-900: oklch(98.2% 0.018 155.826);   /* green-50 */
+  --color-amber-900: oklch(98.7% 0.022 95.277);    /* amber-50 */
+
+  /* Severity label colours — darken for readable contrast on light background */
+  --color-red-400:   oklch(50.5% 0.213 27.518);    /* red-700   */
+  --color-amber-400: oklch(55.5% 0.163 48.998);    /* amber-700 */
+  --color-green-400: oklch(52.7% 0.154 150.069);   /* green-700 */
+}
+
+/* ── High contrast — dark (default) ───────────────────────────────────────── */
+html[data-contrast="high"] {
+  /* Brighten secondary text so it stands out on near-black backgrounds */
+  --color-zinc-400: oklch(87.1% 0.006 286.286);    /* zinc-300 */
+  --color-zinc-500: oklch(70.5% 0.015 286.067);    /* zinc-400 */
+  /* Make borders noticeably visible */
+  --color-zinc-800: oklch(44.2% 0.017 285.786);    /* zinc-600 */
+}
+
+/* ── High contrast — light ─────────────────────────────────────────────────── */
+html[data-theme="light"][data-contrast="high"] {
+  /* Deepen secondary text so it reads on near-white backgrounds */
+  --color-zinc-400: oklch(21% 0.006 285.885);      /* zinc-900 */
+  --color-zinc-500: oklch(27.4% 0.006 286.033);    /* zinc-800 */
+  /* Make borders dark and obvious */
+  --color-zinc-800: oklch(55.2% 0.016 285.938);    /* zinc-500 */
+  /* Pure black primary text */
+  --color-white:    #000;
+  /* Deepen severity colours further */
+  --color-red-400:   oklch(44.4% 0.177 26.899);    /* red-800   */
+  --color-amber-400: oklch(47.3% 0.137 46.201);    /* amber-800 */
+  --color-green-400: oklch(44.8% 0.119 151.328);   /* green-800 */
+}
