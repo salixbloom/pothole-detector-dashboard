@@ -7,9 +7,9 @@ import { useAccessibility } from '../context/AccessibilityContext';
 import type { Contrast } from '../context/AccessibilityContext';
 
 export interface HeatmapPoint {
-  id: number;
-  severity: number;
-  coords: [number, number];
+  pothole_id: string;
+  severity_score: number;  // 0–1
+  coords: [number, number]; // [longitude, latitude] — GeoJSON order
 }
 
 interface Props {
@@ -32,9 +32,11 @@ export default function PotholeMap({ flyToCoords, potholes = [] }: Props) {
   const map = useRef<mapboxgl.Map | null>(null);
   const { theme, contrast } = useAccessibility();
   const mountedStyle = useRef<string | null>(null);
-  // Keep a ref so event callbacks always see the latest pothole data without stale closures
   const potholesRef = useRef(potholes);
   potholesRef.current = potholes;
+  // Needed so the map 'load' callback can see coords set before the map finishes loading
+  const flyToCoordsRef = useRef(flyToCoords);
+  flyToCoordsRef.current = flyToCoords;
 
   function addHeatmap(m: mapboxgl.Map) {
     if (m.getSource('potholes')) return;
@@ -46,7 +48,7 @@ export default function PotholeMap({ flyToCoords, potholes = [] }: Props) {
         features: potholesRef.current.map(p => ({
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: p.coords },
-          properties: { severity: p.severity },
+          properties: { severity_score: p.severity_score },
         })),
       },
     });
@@ -55,17 +57,12 @@ export default function PotholeMap({ flyToCoords, potholes = [] }: Props) {
       id: 'pothole-heat',
       type: 'heatmap',
       source: 'potholes',
-      // Only render when zoomed in enough to distinguish individual streets
       minzoom: 10,
       paint: {
-        // Weight each point by its severity (6–10 scale → 0.3–1.0)
-        'heatmap-weight': ['interpolate', ['linear'], ['get', 'severity'], 6, 0.5, 8, 1],
+        'heatmap-weight': ['interpolate', ['linear'], ['get', 'severity_score'], 0, 0, 1, 1],
         'heatmap-intensity': 1.2,
-        // Radius grows with zoom so blobs stay street-scale, not city-scale
         'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 11, 25, 15, 45, 17, 65],
-        // Fade in between zoom 11–12, then hold at 0.72
         'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 12, 0.72],
-        // Colour ramp: transparent → light yellow → orange → bright red
         'heatmap-color': [
           'interpolate',
           ['linear'],
@@ -90,12 +87,17 @@ export default function PotholeMap({ flyToCoords, potholes = [] }: Props) {
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style,
-      center: [-6.2603, 53.3498],
+      center: [-122.4443, 47.2529], // Tacoma, WA
       zoom: 12,
     });
 
     map.current.on('load', () => {
-      if (map.current) addHeatmap(map.current);
+      if (!map.current) return;
+      addHeatmap(map.current);
+      // Handle flyToCoords that were set before the map finished loading (e.g. from URL params)
+      if (flyToCoordsRef.current) {
+        map.current.flyTo({ center: flyToCoordsRef.current, zoom: 16, duration: 1200 });
+      }
     });
 
     return () => {
@@ -110,7 +112,6 @@ export default function PotholeMap({ flyToCoords, potholes = [] }: Props) {
     if (next === mountedStyle.current) return;
     mountedStyle.current = next;
     map.current.setStyle(next);
-    // Re-add heatmap after the new style finishes loading (setStyle wipes all custom layers)
     map.current.once('style.load', () => {
       if (map.current) addHeatmap(map.current);
     });
