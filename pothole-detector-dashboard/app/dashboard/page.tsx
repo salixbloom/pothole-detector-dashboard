@@ -19,16 +19,70 @@ const MOCK_POTHOLES = [
 export default function Dashboard() {
   const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   function handleSelect(id: number, coords: [number, number]) {
     setSelected(id);
     setFlyToCoords(coords);
   }
 
+  async function handleCitySearch(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    setSearching(true);
+    setSearchError('');
+
+    try {
+      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      const res = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json?access_token=${token}&types=place&limit=1`
+      );
+      const data = await res.json();
+      if (data.features?.length > 0) {
+        const [lng, lat] = data.features[0].center as [number, number];
+        setFlyToCoords([lng, lat]);
+        setSelected(null);
+      } else {
+        setSearchError('City not found');
+      }
+    } catch {
+      setSearchError('Search failed');
+    } finally {
+      setSearching(false);
+    }
+  }
+
   return (
     <div className="flex h-full">
-      <div className="flex-1">
-        <PotholeMap flyToCoords={flyToCoords} />
+      <div className="flex-1 relative">
+        <PotholeMap flyToCoords={flyToCoords} potholes={MOCK_POTHOLES} />
+
+        {/* City search bar */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-80">
+          <form onSubmit={handleCitySearch} className="flex gap-2">
+            <input
+              type="text"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setSearchError(''); }}
+              placeholder="Search for a city…"
+              className="flex-1 px-3 py-2 text-sm bg-zinc-900/90 backdrop-blur border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+            />
+            <button
+              type="submit"
+              disabled={searching}
+              className="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-lg transition-colors"
+            >
+              {searching ? '…' : 'Go'}
+            </button>
+          </form>
+          {searchError && (
+            <p className="mt-1 text-xs text-red-400 text-center">{searchError}</p>
+          )}
+        </div>
       </div>
 
       <aside className="w-80 border-l border-zinc-800 bg-zinc-950 overflow-y-auto shrink-0">

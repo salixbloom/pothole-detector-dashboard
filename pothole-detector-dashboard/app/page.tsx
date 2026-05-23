@@ -19,24 +19,12 @@ export default function Home() {
           Stop guessing. Start fixing.
         </p>
 
-        <div className="flex items-center justify-center gap-3">
-          <Link
-            href="/login"
-            className="px-5 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
-          >
-            Log in
-          </Link>
-          <Link
-            href="/request-access"
-            className="px-5 py-2.5 text-sm font-medium text-zinc-300 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg transition-colors"
-          >
-            Request access
-          </Link>
-        </div>
-
-        <p className="text-xs text-zinc-600 mt-6">
-          Access is granted manually to verified city councils.
-        </p>
+        <Link
+          href="/dashboard"
+          className="px-5 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+        >
+          Get started
+        </Link>
       </div>
     </div>
   );
