@@ -1,21 +1,16 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { MOCK_POTHOLES, lngLat, avgIntensity } from '@/lib/mock-potholes';
+import { lngLat, avgIntensity, type Pothole } from '@/lib/mock-potholes';
+import { fetchPotholes } from '@/lib/api';
 import type { HeatmapPoint } from '../components/Map';
 
 const PotholeMap = dynamic(() => import('../components/Map'), {
   ssr: false,
   loading: () => <div className="w-full h-full bg-zinc-900" />,
 });
-
-const HEATMAP_POINTS: HeatmapPoint[] = MOCK_POTHOLES.map(p => ({
-  pothole_id: p.pothole_id,
-  severity_score: p.severity_score,
-  coords: lngLat(p),
-}));
 
 function severityColor(score: number) {
   if (score >= 0.8) return 'text-red-400';
@@ -38,13 +33,29 @@ function DashboardContent() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
 
+  const [potholes, setPotholes] = useState<Pothole[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
+
+  useEffect(() => {
+    fetchPotholes({ limit: 500 })
+      .then(data => setPotholes([...data].sort((a, b) => (b.severity_score * b.hit_count) - (a.severity_score * a.hit_count))))
+      .catch(() => setFetchError('Could not load pothole data'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const heatmapPoints: HeatmapPoint[] = potholes.map(p => ({
+    pothole_id: p.pothole_id,
+    severity_score: p.severity_score,
+    coords: lngLat(p),
+  }));
+
   function handleSelect(id: string, coords: [number, number]) {
     setSelected(id);
     setFlyToCoords(coords);
   }
 
-  async function handleCitySearch(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleCitySearch() {
     const trimmed = query.trim();
     if (!trimmed) return;
 
@@ -74,11 +85,11 @@ function DashboardContent() {
   return (
     <div className="flex h-full">
       <div className="flex-1 relative">
-        <PotholeMap flyToCoords={flyToCoords} potholes={HEATMAP_POINTS} />
+        <PotholeMap flyToCoords={flyToCoords} potholes={heatmapPoints} />
 
         {/* City search bar */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-80">
-          <form onSubmit={handleCitySearch} className="flex gap-2">
+          <form onSubmit={(e) => { e.preventDefault(); handleCitySearch(); }} className="flex gap-2">
             <input
               type="text"
               value={query}
@@ -107,7 +118,22 @@ function DashboardContent() {
         </div>
 
         <div className="divide-y divide-zinc-800">
-          {MOCK_POTHOLES.map((pothole, i) => (
+          {loading && (
+            <div className="px-4 py-8 text-center">
+              <p className="text-xs text-zinc-500">Loading…</p>
+            </div>
+          )}
+          {fetchError && (
+            <div className="px-4 py-8 text-center">
+              <p className="text-xs text-red-400">{fetchError}</p>
+            </div>
+          )}
+          {!loading && !fetchError && potholes.length === 0 && (
+            <div className="px-4 py-8 text-center">
+              <p className="text-xs text-zinc-500">No potholes found</p>
+            </div>
+          )}
+          {potholes.map((pothole, i) => (
             <button
               key={pothole.pothole_id}
               onClick={() => handleSelect(pothole.pothole_id, lngLat(pothole))}

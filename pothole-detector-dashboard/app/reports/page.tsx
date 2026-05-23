@@ -1,16 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import { MOCK_POTHOLES, makeSubReports, avgIntensity } from '@/lib/mock-potholes';
-import type { PotholeStatus } from '@/lib/mock-potholes';
+import { makeSubReports, avgIntensity, type Pothole, type PotholeStatus } from '@/lib/mock-potholes';
+import { fetchPotholes, fetchMonitoringLive, fetchMonitoringHistory, type LiveMetrics, type HistorySnapshot } from '@/lib/api';
 
-type Tab = 'clusters' | 'daily' | 'resolved' | 'intensity';
+type Tab = 'clusters' | 'daily' | 'resolved' | 'intensity' | 'system';
 
+// Hardcoded — no per-day breakdown endpoint exists yet
 const DAILY_DATA = [
   { day: 'May 9',  reports: 23 }, { day: 'May 10', reports: 31 },
   { day: 'May 11', reports: 18 }, { day: 'May 12', reports: 42 },
@@ -19,19 +20,6 @@ const DAILY_DATA = [
   { day: 'May 17', reports: 45 }, { day: 'May 18', reports: 52 },
   { day: 'May 19', reports: 38 }, { day: 'May 20', reports: 29 },
   { day: 'May 21', reports: 61 }, { day: 'May 22', reports: 44 },
-];
-
-const WEEKLY_RESOLVED = [
-  { period: 'Week 1', resolved: 3 }, { period: 'Week 2', resolved: 5 },
-  { period: 'Week 3', resolved: 2 }, { period: 'Week 4', resolved: 7 },
-  { period: 'Week 5', resolved: 4 }, { period: 'Week 6', resolved: 8 },
-  { period: 'Week 7', resolved: 6 }, { period: 'Week 8', resolved: 9 },
-];
-
-const MONTHLY_RESOLVED = [
-  { period: 'Jan', resolved: 12 }, { period: 'Feb', resolved: 8  },
-  { period: 'Mar', resolved: 15 }, { period: 'Apr', resolved: 19 },
-  { period: 'May', resolved: 34 },
 ];
 
 const INTENSITY_DIST = [
@@ -64,9 +52,24 @@ function mapLink(p: Pothole) {
   return `/dashboard?lat=${p.canonical_lat}&lng=${p.canonical_lng}&id=${p.pothole_id}`;
 }
 
-function ClustersTab({ minSeverity }: { minSeverity: number }) {
+function buildResolvedData(potholes: Pothole[], view: 'weekly' | 'monthly') {
+  const resolved = potholes.filter(p => p.status === 'resolved');
+  const counts: Record<string, number> = {};
+
+  for (const p of resolved) {
+    const d = new Date(p.last_seen);
+    const key = view === 'monthly'
+      ? d.toLocaleDateString('en-US', { month: 'short' })
+      : `Week ${Math.ceil(d.getDate() / 7)} (${d.toLocaleDateString('en-US', { month: 'short' })})`;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  return Object.entries(counts).map(([period, resolved]) => ({ period, resolved }));
+}
+
+function ClustersTab({ potholes, minSeverity }: { potholes: Pothole[]; minSeverity: number }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const filtered = MOCK_POTHOLES.filter(p => p.severity_score >= minSeverity);
+  const filtered = potholes.filter(p => p.severity_score >= minSeverity);
 
   return (
     <div className="divide-y divide-zinc-800">
@@ -78,7 +81,6 @@ function ClustersTab({ minSeverity }: { minSeverity: number }) {
         return (
           <div key={p.pothole_id}>
             <div className="flex items-center gap-4 px-6 py-4 hover:bg-zinc-900 transition-colors">
-              {/* Expand/collapse area */}
               <div
                 className="flex-1 cursor-pointer"
                 onClick={() => setExpanded(isOpen ? null : p.pothole_id)}
@@ -179,9 +181,9 @@ function DailyTab() {
   );
 }
 
-function ResolvedTab() {
+function ResolvedTab({ potholes }: { potholes: Pothole[] }) {
   const [view, setView] = useState<'weekly' | 'monthly'>('weekly');
-  const data = view === 'weekly' ? WEEKLY_RESOLVED : MONTHLY_RESOLVED;
+  const data = buildResolvedData(potholes, view);
 
   return (
     <div className="p-6">
@@ -204,22 +206,26 @@ function ResolvedTab() {
           ))}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={320}>
-        <BarChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-          <XAxis dataKey="period" tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} />
-          <Tooltip {...TOOLTIP_STYLE} itemStyle={{ color: '#4ade80' }} />
-          <Bar dataKey="resolved" fill="#4ade80" radius={[4, 4, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      {data.length === 0 ? (
+        <p className="text-xs text-zinc-500 text-center py-16">No resolved potholes in current data</p>
+      ) : (
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+            <XAxis dataKey="period" tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip {...TOOLTIP_STYLE} itemStyle={{ color: '#4ade80' }} />
+            <Bar dataKey="resolved" fill="#4ade80" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }
 
-function IntensityTab() {
+function IntensityTab({ potholes }: { potholes: Pothole[] }) {
   const [min, setMin] = useState(0);
-  const filtered = MOCK_POTHOLES.filter(p => p.severity_score >= min);
+  const filtered = potholes.filter(p => p.severity_score >= min);
 
   return (
     <div className="p-6">
@@ -278,16 +284,229 @@ function IntensityTab() {
   );
 }
 
+function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-5 py-4">
+      <p className="text-xs text-zinc-500 mb-1">{label}</p>
+      <p className="text-xl font-semibold text-white">{value}</p>
+      {sub && <p className="text-xs text-zinc-500 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function formatMetricValue(v: unknown): string {
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2);
+  if (typeof v === 'string') return v;
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return '—';
+}
+
+function histTimeLabel(snapshots: HistorySnapshot[]): string {
+  if (snapshots.length === 0) return '';
+  const times = snapshots
+    .map(s => s.timestamp ? new Date(s.timestamp as string).getTime() : null)
+    .filter((t): t is number => t !== null);
+  if (times.length < 2) return `${snapshots.length} snapshot${snapshots.length === 1 ? '' : 's'}`;
+  const spanMs = Math.max(...times) - Math.min(...times);
+  const spanMins = Math.round(spanMs / 60000);
+  if (spanMins < 60) return `last ${spanMins} min`;
+  const spanHours = parseFloat((spanMs / 3600000).toFixed(1));
+  return `last ${spanHours} h`;
+}
+
+const CHART_COLORS = ['#60a5fa', '#f87171', '#4ade80', '#fb923c', '#a78bfa', '#facc15', '#34d399', '#f472b6'];
+
+function MetricChart({
+  metricKey,
+  data,
+  color,
+  timeLabel,
+  snapshotCount,
+}: {
+  metricKey: string;
+  data: { t: string; value: number }[];
+  color: string;
+  timeLabel: string;
+  snapshotCount: number;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <h4 className="text-sm font-medium text-white capitalize">{metricKey.replace(/_/g, ' ')}</h4>
+        <span className="text-xs text-zinc-500">{timeLabel}</span>
+      </div>
+      <p className="text-xs text-zinc-500 mb-3">
+        {snapshotCount} snapshot{snapshotCount === 1 ? '' : 's'} · 15-min intervals
+      </p>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={data}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+          <XAxis dataKey="t" tick={{ fill: '#71717a', fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} width={40} />
+          <Tooltip {...TOOLTIP_STYLE} itemStyle={{ color }} />
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: color }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function SystemTab() {
+  const [live, setLive] = useState<LiveMetrics | null>(null);
+  const [history, setHistory] = useState<HistorySnapshot[]>([]);
+  const [liveError, setLiveError] = useState('');
+  const [histError, setHistError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+  const [selectedKey, setSelectedKey] = useState('');
+
+  useEffect(() => {
+    const p1 = fetchMonitoringLive()
+      .then(setLive)
+      .catch(() => setLiveError('Could not load live metrics'));
+
+    const p2 = fetchMonitoringHistory(24)
+      .then(data => {
+        setHistory(data);
+        if (data.length > 0) {
+          const first = Object.keys(data[0]).find(k => k !== 'timestamp' && typeof data[0][k] === 'number');
+          if (first) setSelectedKey(first);
+        }
+      })
+      .catch(() => setHistError('Could not load history'));
+
+    Promise.allSettled([p1, p2]).finally(() => setLoading(false));
+  }, []);
+
+  const metricKeys = history.length > 0
+    ? Object.keys(history[0]).filter(k => k !== 'timestamp' && typeof history[0][k] === 'number')
+    : [];
+
+  const timeLabel = histTimeLabel(history);
+
+  function chartData(key: string) {
+    return history.map(s => {
+      let t = '—';
+      if (s.timestamp) {
+        const d = new Date(s.timestamp as string);
+        t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+      return { t, value: s[key] as number };
+    });
+  }
+
+  const liveCards = live
+    ? Object.entries(live).filter(([, v]) => typeof v !== 'object')
+    : [];
+
+  return (
+    <div className="p-6 space-y-8">
+      {/* Live metrics */}
+      <div>
+        <h3 className="text-sm font-medium text-white mb-1">Live system metrics</h3>
+        <p className="text-xs text-zinc-400 mb-4">Current snapshot from the backend</p>
+
+        {loading && <p className="text-xs text-zinc-500">Loading…</p>}
+        {liveError && <p className="text-xs text-red-400">{liveError}</p>}
+
+        {liveCards.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {liveCards.map(([key, val]) => (
+              <MetricCard
+                key={key}
+                label={key.replace(/_/g, ' ')}
+                value={formatMetricValue(val)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* History charts */}
+      {metricKeys.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium text-white">History</h3>
+            {!showAll && metricKeys.length > 1 && (
+              <select
+                value={selectedKey}
+                onChange={e => setSelectedKey(e.target.value)}
+                className="text-xs bg-zinc-900 border border-zinc-700 text-white rounded px-2 py-1.5 focus:outline-none focus:border-zinc-500"
+              >
+                {metricKeys.map(k => (
+                  <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {histError && <p className="text-xs text-red-400 mb-3">{histError}</p>}
+
+          {showAll ? (
+            <div className="space-y-10">
+              {metricKeys.map((k, i) => (
+                <MetricChart
+                  key={k}
+                  metricKey={k}
+                  data={chartData(k)}
+                  color={CHART_COLORS[i % CHART_COLORS.length]}
+                  timeLabel={timeLabel}
+                  snapshotCount={history.length}
+                />
+              ))}
+            </div>
+          ) : (
+            selectedKey && (
+              <MetricChart
+                metricKey={selectedKey}
+                data={chartData(selectedKey)}
+                color={CHART_COLORS[metricKeys.indexOf(selectedKey) % CHART_COLORS.length]}
+                timeLabel={timeLabel}
+                snapshotCount={history.length}
+              />
+            )
+          )}
+
+          {metricKeys.length > 1 && (
+            <button
+              onClick={() => setShowAll(v => !v)}
+              className="mt-6 text-xs text-zinc-400 hover:text-white transition-colors underline underline-offset-2"
+            >
+              {showAll ? 'Hide all' : `Show all ${metricKeys.length} metrics`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!loading && metricKeys.length === 0 && !histError && (
+        <p className="text-xs text-zinc-500">No history snapshots available yet.</p>
+      )}
+    </div>
+  );
+}
+
 const TABS: { id: Tab; label: string }[] = [
   { id: 'clusters',  label: 'Clusters'       },
   { id: 'daily',     label: 'Reports per day' },
   { id: 'resolved',  label: 'Resolved'        },
   { id: 'intensity', label: 'Intensity'       },
+  { id: 'system',    label: 'System'          },
 ];
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>('clusters');
   const [minSeverity, setMinSeverity] = useState(0);
+
+  const [potholes, setPotholes] = useState<Pothole[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
+
+  useEffect(() => {
+    fetchPotholes({ limit: 500 })
+      .then(setPotholes)
+      .catch(() => setFetchError('Could not load pothole data'))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -296,7 +515,7 @@ export default function ReportsPage() {
           <div>
             <h1 className="text-lg font-semibold text-white">Reports</h1>
             <p className="text-sm text-zinc-400 mt-0.5">
-              Pierce County · {MOCK_POTHOLES.length} clusters
+              {loading ? 'Loading…' : fetchError ? fetchError : `${potholes.length} clusters`}
             </p>
           </div>
           {tab === 'clusters' && (
@@ -332,10 +551,11 @@ export default function ReportsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {tab === 'clusters'  && <ClustersTab minSeverity={minSeverity} />}
+        {tab === 'clusters'  && <ClustersTab potholes={potholes} minSeverity={minSeverity} />}
         {tab === 'daily'     && <DailyTab />}
-        {tab === 'resolved'  && <ResolvedTab />}
-        {tab === 'intensity' && <IntensityTab />}
+        {tab === 'resolved'  && <ResolvedTab potholes={potholes} />}
+        {tab === 'intensity' && <IntensityTab potholes={potholes} />}
+        {tab === 'system'    && <SystemTab />}
       </div>
     </div>
   );
