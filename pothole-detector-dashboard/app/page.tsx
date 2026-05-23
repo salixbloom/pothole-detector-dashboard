@@ -1,66 +1,43 @@
-'use client';
+import Link from 'next/link';
 
-import { useState } from 'react';
-import dynamic from 'next/dynamic';
-
-const PotholeMap = dynamic(() => import('./components/Map'), {
-  ssr: false,
-  loading: () => <div className="w-full h-full bg-zinc-900" />,
-});
-
-const MOCK_POTHOLES = [
-  { id: 1, rank: 1, severity: 9.2, hits: 847, street: "O'Connell Street", coords: [-6.2597, 53.3498] as [number, number] },
-  { id: 2, rank: 2, severity: 8.7, hits: 623, street: 'Dame Street', coords: [-6.2672, 53.3441] as [number, number] },
-  { id: 3, rank: 3, severity: 7.9, hits: 511, street: 'Grafton Street', coords: [-6.2591, 53.3401] as [number, number] },
-  { id: 4, rank: 4, severity: 7.1, hits: 390, street: 'Dorset Street', coords: [-6.2651, 53.3576] as [number, number] },
-  { id: 5, rank: 5, severity: 6.4, hits: 274, street: 'Thomas Street', coords: [-6.2827, 53.3427] as [number, number] },
-];
-
-export default function Dashboard() {
-  const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
-
-  function handleSelect(id: number, coords: [number, number]) {
-    setSelected(id);
-    setFlyToCoords(coords);
-  }
-
+export default function Home() {
   return (
-    <div className="flex h-full">
-      <div className="flex-1">
-        <PotholeMap flyToCoords={flyToCoords} />
+    <div className="flex flex-col items-center justify-center h-full px-6 text-center">
+      <div className="max-w-lg">
+        <span className="inline-block text-xs font-medium tracking-widest text-red-400 uppercase mb-6">
+          Road intelligence platform
+        </span>
+
+        <h1 className="text-4xl font-bold text-white leading-tight mb-4">
+          Potholes are destroying your city.
+          <span className="text-zinc-400"> We track every one.</span>
+        </h1>
+
+        <p className="text-zinc-400 text-base leading-relaxed mb-10">
+          PotholeIQ gives city councils real-time visibility into road damage —
+          ranked by severity, backed by sensor data, and ready to act on.
+          Stop guessing. Start fixing.
+        </p>
+
+        <div className="flex items-center justify-center gap-3">
+          <Link
+            href="/login"
+            className="px-5 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+          >
+            Log in
+          </Link>
+          <Link
+            href="/request-access"
+            className="px-5 py-2.5 text-sm font-medium text-zinc-300 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg transition-colors"
+          >
+            Request access
+          </Link>
+        </div>
+
+        <p className="text-xs text-zinc-600 mt-6">
+          Access is granted manually to verified city councils.
+        </p>
       </div>
-
-      <aside className="w-80 border-l border-zinc-800 bg-zinc-950 overflow-y-auto shrink-0">
-        <div className="p-4 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-white">Priority Potholes</h2>
-          <p className="text-xs text-zinc-400 mt-0.5">Ranked by severity × traffic</p>
-        </div>
-
-        <div className="divide-y divide-zinc-800">
-          {MOCK_POTHOLES.map(pothole => (
-            <button
-              key={pothole.id}
-              onClick={() => handleSelect(pothole.id, pothole.coords)}
-              className={`w-full text-left px-4 py-3 hover:bg-zinc-900 transition-colors ${
-                selected === pothole.id ? 'bg-zinc-900' : ''
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-zinc-400">#{pothole.rank}</span>
-                <span className={`text-xs font-semibold ${
-                  pothole.severity >= 8 ? 'text-red-400' :
-                  pothole.severity >= 6 ? 'text-amber-400' : 'text-green-400'
-                }`}>
-                  {pothole.severity.toFixed(1)}
-                </span>
-              </div>
-              <p className="text-sm text-white font-medium">{pothole.street}</p>
-              <p className="text-xs text-zinc-400 mt-0.5">{pothole.hits} hits recorded</p>
-            </button>
-          ))}
-        </div>
-      </aside>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist } from 'next/font/google';
 import Navbar from './components/Navbar';
 import { AccessibilityProvider } from './context/AccessibilityContext';
+import { getSession } from '@/lib/auth';
 import './globals.css';
 
 const geist = Geist({ subsets: ['latin'] });
@@ -25,14 +26,16 @@ const INIT_A11Y = `(function(){try{
   h.setAttribute('data-text-size',size);
 }catch(e){}})();`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getSession();
+
   return (
     <html lang="en" className="h-full" data-theme="dark" data-contrast="normal" data-text-size="md">
-      <body className={`${geist.className} bg-zinc-950 text-white h-full flex flex-col`}>
+      <body suppressHydrationWarning className={`${geist.className} bg-zinc-950 text-white h-full flex flex-col`}>
         {/* Inline script prevents theme flash before React hydration */}
         <script dangerouslySetInnerHTML={{ __html: INIT_A11Y }} />
         <AccessibilityProvider>
-          <Navbar />
+          <Navbar session={session} />
           <main className="flex-1 overflow-hidden">
             {children}
           </main>
