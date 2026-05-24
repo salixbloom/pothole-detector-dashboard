@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer
+  CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie,
 } from 'recharts';
 import { makeSubReports, avgIntensity, type Pothole, type PotholeStatus } from '@/lib/mock-potholes';
 import { fetchPotholes, fetchMonitoringLive, fetchMonitoringHistory, type LiveMetrics, type HistorySnapshot } from '@/lib/api';
@@ -314,6 +314,161 @@ function histTimeLabel(snapshots: HistorySnapshot[]): string {
   return `last ${spanHours} h`;
 }
 
+// --- System tab helpers ---
+
+function pickField<T>(obj: Record<string, unknown>, ...keys: string[]): T | null {
+  for (const k of keys) {
+    if (k in obj && obj[k] != null) return obj[k] as T;
+  }
+  return null;
+}
+
+function gaugeColor(pct: number): string {
+  if (pct >= 0.8) return '#f87171';
+  if (pct >= 0.5) return '#fb923c';
+  return '#4ade80';
+}
+
+function LiveTimestamp({ lastFetchedAt, onReconnect }: {
+  lastFetchedAt: number | null;
+  onReconnect: () => void;
+}) {
+  const [secondsAgo, setSecondsAgo] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (lastFetchedAt === null) return;
+    const tick = () => setSecondsAgo(Math.floor((Date.now() - lastFetchedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastFetchedAt]);
+
+  if (secondsAgo === null) return null;
+
+  if (secondsAgo >= 300) {
+    return (
+      <button
+        onClick={onReconnect}
+        className="text-xs text-red-400 hover:text-red-300 transition-colors"
+      >
+        Last attempt failed — reconnect
+      </button>
+    );
+  }
+
+  const label = secondsAgo < 60
+    ? `${secondsAgo}s ago`
+    : `${Math.floor(secondsAgo / 60)}m ${secondsAgo % 60}s ago`;
+
+  return <span className="text-xs text-zinc-500">{label}</span>;
+}
+
+function GaugeChart({ label, value, max = 100, sub }: { label: string; value: number; max?: number; sub?: string }) {
+  const pct = Math.min(Math.max(value / max, 0), 1);
+  const color = gaugeColor(pct);
+  // fill on data objects replaces deprecated Cell
+  const data = [
+    { v: pct,     fill: color    },
+    { v: 1 - pct, fill: '#3f3f46' },
+  ];
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col items-center">
+      <p className="text-xs text-zinc-500 mb-2 self-start">{label}</p>
+      <div className="relative overflow-hidden" style={{ width: 168, height: 90 }}>
+        <PieChart width={180} height={160}>
+          <Pie
+            data={data}
+            cx={80}
+            cy={90}
+            startAngle={180}
+            endAngle={0}
+            innerRadius={60}
+            outerRadius={80}
+            dataKey="v"
+            strokeWidth={0}
+          />
+        </PieChart>
+        <div className="absolute bottom-0 inset-x-0 flex justify-center">
+          <span className="text-xl font-bold text-white">{value.toFixed(1)}%</span>
+        </div>
+      </div>
+      {sub && <p className="text-xs text-zinc-500 mt-2 text-center">{sub}</p>}
+    </div>
+  );
+}
+
+function PipelineStats({ processed, failed, rejected, queuePending, dlq }: {
+  processed: number | null;
+  failed: number | null;
+  rejected: number | null;
+  queuePending: number | null;
+  dlq: number | null;
+}) {
+  const total = (processed ?? 0) + (failed ?? 0) + (rejected ?? 0);
+  const successRate = total > 0 ? ((processed ?? 0) / total * 100).toFixed(1) : null;
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+      <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-4">Event pipeline</p>
+
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="text-center">
+          <p className="text-2xl font-semibold text-green-400">{processed ?? '—'}</p>
+          <p className="text-xs text-zinc-500 mt-0.5">processed</p>
+        </div>
+        <div className="text-center">
+          <p className="text-2xl font-semibold text-red-400">{failed ?? '—'}</p>
+          <p className="text-xs text-zinc-500 mt-0.5">failed</p>
+        </div>
+        <div className="text-center">
+          <p className="text-2xl font-semibold text-amber-400">{rejected ?? '—'}</p>
+          <p className="text-xs text-zinc-500 mt-0.5">rejected</p>
+        </div>
+      </div>
+
+      {total > 0 && (
+        <div className="flex h-1.5 rounded-full overflow-hidden mb-4">
+          <div className="bg-green-500 transition-all" style={{ width: `${(processed ?? 0) / total * 100}%` }} />
+          <div className="bg-red-500 transition-all"   style={{ width: `${(failed   ?? 0) / total * 100}%` }} />
+          <div className="bg-amber-500 transition-all" style={{ width: `${(rejected ?? 0) / total * 100}%` }} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-4 text-xs border-t border-zinc-800 pt-3">
+        <span className="text-zinc-500 text-center">
+          Success rate{' '}
+          <span className="text-white font-medium">{successRate !== null ? `${successRate}%` : '—'}</span>
+        </span>
+        <span className="text-zinc-500 text-center">
+          Queue{' '}
+          <span className="text-white font-medium">{queuePending ?? '—'}</span>
+        </span>
+        <span className="text-zinc-500 text-center">
+          DLQ{' '}
+          <span className={`font-medium ${(dlq ?? 0) > 0 ? 'text-red-400' : 'text-white'}`}>
+            {dlq ?? '—'}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Keys consumed by specialised widgets — excluded from the generic card grid
+const HANDLED_LIVE_KEYS = new Set([
+  'captured_at', 'timestamp', 'time', 'captured_timestamp',
+  'cpu_percent', 'cpu', 'cpu_usage',
+  'memory_percent', 'memory', 'memory_usage',
+  'db_memory_used', 'db_memory', 'database_memory', 'database_memory_used',
+  'total_memory', 'memory_total', 'memory_limit',
+  'queue_pending', 'pending_queue', 'pending', 'queue_depth',
+  'dlq', 'dlq_count', 'dead_letter_queue', 'dlq_pending',
+  'events_processed', 'processed', 'processed_events',
+  'events_failed', 'failed', 'failed_events',
+  'events_rejected', 'rejected', 'rejected_events',
+]);
+
 const CHART_COLORS = ['#60a5fa', '#f87171', '#4ade80', '#fb923c', '#a78bfa', '#facc15', '#34d399', '#f472b6'];
 
 function MetricChart({
@@ -351,6 +506,8 @@ function MetricChart({
   );
 }
 
+const LIVE_POLL_MS = 30_000;
+
 function SystemTab() {
   const [live, setLive] = useState<LiveMetrics | null>(null);
   const [history, setHistory] = useState<HistorySnapshot[]>([]);
@@ -359,13 +516,20 @@ function SystemTab() {
   const [loading, setLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
+
+  const pollRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    const p1 = fetchMonitoringLive()
-      .then(setLive)
-      .catch(() => setLiveError('Could not load live metrics'));
+    function poll() {
+      fetchMonitoringLive()
+        .then(data => { setLive(data); setLiveError(''); setLastFetchedAt(Date.now()); })
+        .catch(() => setLiveError('Server unreachable'));
+    }
+    pollRef.current = poll;
+    poll();
 
-    const p2 = fetchMonitoringHistory(24)
+    fetchMonitoringHistory(24)
       .then(data => {
         setHistory(data);
         if (data.length > 0) {
@@ -373,45 +537,93 @@ function SystemTab() {
           if (first) setSelectedKey(first);
         }
       })
-      .catch(() => setHistError('Could not load history'));
+      .catch(() => setHistError('Could not load history'))
+      .finally(() => setLoading(false));
 
-    Promise.allSettled([p1, p2]).finally(() => setLoading(false));
+    const id = setInterval(poll, LIVE_POLL_MS);
+    return () => clearInterval(id);
   }, []);
+
+  const L = (live ?? {}) as Record<string, unknown>;
+  const cpuPct       = pickField<number>(L, 'cpu_percent', 'cpu', 'cpu_usage');
+  const memPct       = pickField<number>(L, 'memory_percent', 'memory', 'memory_usage');
+  const dbMemUsed    = pickField<number>(L, 'db_memory_used', 'db_memory', 'database_memory', 'database_memory_used');
+  const totalMem     = pickField<number>(L, 'total_memory', 'memory_total', 'memory_limit');
+  const processed    = pickField<number>(L, 'events_processed', 'processed', 'processed_events');
+  const failed       = pickField<number>(L, 'events_failed', 'failed', 'failed_events');
+  const rejected     = pickField<number>(L, 'events_rejected', 'rejected', 'rejected_events');
+  const queuePending = pickField<number>(L, 'queue_pending', 'pending_queue', 'pending', 'queue_depth');
+  const dlq          = pickField<number>(L, 'dlq', 'dlq_count', 'dead_letter_queue', 'dlq_pending');
+
+  const memSub = dbMemUsed !== null
+    ? totalMem !== null
+      ? `DB: ${formatMetricValue(dbMemUsed)} / ${formatMetricValue(totalMem)} total`
+      : `DB: ${formatMetricValue(dbMemUsed)}`
+    : undefined;
+
+  const hasGauges   = cpuPct !== null || memPct !== null;
+  const hasPipeline = [processed, failed, rejected, queuePending, dlq].some(v => v !== null);
+
+  const residualCards = live
+    ? Object.entries(live).filter(([k, v]) => !HANDLED_LIVE_KEYS.has(k) && typeof v !== 'object')
+    : [];
 
   const metricKeys = history.length > 0
     ? Object.keys(history[0]).filter(k => k !== 'timestamp' && typeof history[0][k] === 'number')
     : [];
 
-  const timeLabel = histTimeLabel(history);
+  // Keep at most 120 evenly-spaced points per chart — avoids rendering 1000 tick marks
+  const displayHistory = history.length > 120
+    ? history.filter((_, i) => i % Math.ceil(history.length / 120) === 0)
+    : history;
+
+  const timeLabel = histTimeLabel(displayHistory);
 
   function chartData(key: string) {
-    return history.map(s => {
+    return displayHistory.map(s => {
       let t = '—';
       if (s.timestamp) {
         const d = new Date(s.timestamp as string);
-        t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        if (!isNaN(d.getTime())) {
+          t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        }
       }
       return { t, value: s[key] as number };
     });
   }
 
-  const liveCards = live
-    ? Object.entries(live).filter(([, v]) => typeof v !== 'object')
-    : [];
-
   return (
     <div className="p-6 space-y-8">
       {/* Live metrics */}
-      <div>
-        <h3 className="text-sm font-medium text-white mb-1">Live system metrics</h3>
-        <p className="text-xs text-zinc-400 mb-4">Current snapshot from the backend</p>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-white">Live system metrics</h3>
+          <LiveTimestamp lastFetchedAt={lastFetchedAt} onReconnect={() => pollRef.current()} />
+        </div>
 
         {loading && <p className="text-xs text-zinc-500">Loading…</p>}
         {liveError && <p className="text-xs text-red-400">{liveError}</p>}
 
-        {liveCards.length > 0 && (
+        {hasGauges && (
+          <div className="grid grid-cols-2 gap-3">
+            {cpuPct    !== null && <GaugeChart label="CPU"    value={cpuPct} />}
+            {memPct    !== null && <GaugeChart label="Memory" value={memPct} sub={memSub} />}
+          </div>
+        )}
+
+        {hasPipeline && (
+          <PipelineStats
+            processed={processed}
+            failed={failed}
+            rejected={rejected}
+            queuePending={queuePending}
+            dlq={dlq}
+          />
+        )}
+
+        {residualCards.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {liveCards.map(([key, val]) => (
+            {residualCards.map(([key, val]) => (
               <MetricCard
                 key={key}
                 label={key.replace(/_/g, ' ')}
@@ -443,7 +655,7 @@ function SystemTab() {
           {histError && <p className="text-xs text-red-400 mb-3">{histError}</p>}
 
           {showAll ? (
-            <div className="space-y-10">
+            <div className="grid grid-cols-2 gap-6">
               {metricKeys.map((k, i) => (
                 <MetricChart
                   key={k}
@@ -451,7 +663,7 @@ function SystemTab() {
                   data={chartData(k)}
                   color={CHART_COLORS[i % CHART_COLORS.length]}
                   timeLabel={timeLabel}
-                  snapshotCount={history.length}
+                  snapshotCount={displayHistory.length}
                 />
               ))}
             </div>
@@ -462,7 +674,7 @@ function SystemTab() {
                 data={chartData(selectedKey)}
                 color={CHART_COLORS[metricKeys.indexOf(selectedKey) % CHART_COLORS.length]}
                 timeLabel={timeLabel}
-                snapshotCount={history.length}
+                snapshotCount={displayHistory.length}
               />
             )
           )}

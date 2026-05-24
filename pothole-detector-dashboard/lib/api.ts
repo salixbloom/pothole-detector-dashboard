@@ -62,9 +62,38 @@ export async function fetchMonitoringLive(): Promise<LiveMetrics> {
   return res.json();
 }
 
+function resolveTimestamp(s: Record<string, unknown>): string | undefined {
+  // 1. Try known field names
+  const candidate = s.timestamp ?? s.captured_at ?? s.time ?? s.ts
+    ?? s.created_at ?? s.recorded_at ?? s.date ?? s.datetime ?? s.snapshot_time;
+
+  if (typeof candidate === 'string' && !isNaN(Date.parse(candidate))) return candidate;
+
+  // 2. Handle numeric Unix timestamps (seconds or milliseconds)
+  const asNum = typeof candidate === 'number' ? candidate : null;
+  if (asNum !== null) {
+    const ms = asNum > 1e12 ? asNum : asNum * 1000;
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // 3. Scan every field — first string that parses as a date wins
+  for (const val of Object.values(s)) {
+    if (typeof val === 'string' && !isNaN(Date.parse(val))) return val;
+    if (typeof val === 'number' && val > 1e9) {
+      const ms = val > 1e12 ? val : val * 1000;
+      const d = new Date(ms);
+      if (!isNaN(d.getTime())) return d.toISOString();
+    }
+  }
+
+  return undefined;
+}
+
 export async function fetchMonitoringHistory(hours = 24): Promise<HistorySnapshot[]> {
   const res = await fetch(`/api/monitoring/history?hours=${hours}`);
   if (!res.ok) throw new Error('Failed to fetch monitoring history');
   const data = await res.json();
-  return Array.isArray(data) ? data : (data.snapshots ?? data.history ?? []);
+  const raw: Record<string, unknown>[] = Array.isArray(data) ? data : (data.snapshots ?? data.history ?? []);
+  return raw.map(s => ({ ...s, timestamp: resolveTimestamp(s) }));
 }
