@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { lngLat, avgIntensity, type Pothole } from '@/lib/mock-potholes';
+import { lngLat, type Pothole } from '@/lib/mock-potholes';
 import { fetchPotholes } from '@/lib/api';
 import type { HeatmapPoint } from '../components/Map';
 
@@ -12,10 +12,16 @@ const PotholeMap = dynamic(() => import('../components/Map'), {
   loading: () => <div className="w-full h-full bg-zinc-900" />,
 });
 
-function severityColor(score: number) {
-  if (score >= 0.8) return 'text-red-400';
-  if (score >= 0.6) return 'text-amber-400';
+function priorityColor(score: number) {
+  if (score >= 5) return 'text-red-400';
+  if (score >= 3) return 'text-amber-400';
   return 'text-green-400';
+}
+
+function severityBarColor(score: number) {
+  if (score >= 5) return 'bg-red-500';
+  if (score >= 3) return 'bg-amber-500';
+  return 'bg-green-500';
 }
 
 function DashboardContent() {
@@ -39,7 +45,7 @@ function DashboardContent() {
 
   useEffect(() => {
     fetchPotholes({ limit: 500 })
-      .then(data => setPotholes([...data].sort((a, b) => (b.severity_score * b.hit_count) - (a.severity_score * a.hit_count))))
+      .then(data => setPotholes([...data].sort((a, b) => (b.hit_count * b.severity_score) - (a.hit_count * a.severity_score))))
       .catch(() => setFetchError('Could not load pothole data'))
       .finally(() => setLoading(false));
   }, []);
@@ -133,24 +139,49 @@ function DashboardContent() {
               <p className="text-xs text-zinc-500">No potholes found</p>
             </div>
           )}
-          {potholes.map((pothole, i) => (
-            <button
-              key={pothole.pothole_id}
-              onClick={() => handleSelect(pothole.pothole_id, lngLat(pothole))}
-              className={`w-full text-left px-4 py-3 hover:bg-zinc-900 transition-colors ${
-                selected === pothole.pothole_id ? 'bg-zinc-900' : ''
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-zinc-400">#{i + 1}</span>
-                <span className={`text-xs font-semibold ${severityColor(avgIntensity(pothole) / 10)}`}>
-                  {avgIntensity(pothole).toFixed(1)}
-                </span>
-              </div>
-              <p className="text-sm text-white font-medium">{pothole.street}</p>
-              <p className="text-xs text-zinc-400 mt-0.5">{pothole.hit_count} hits recorded</p>
-            </button>
-          ))}
+          {potholes.map((pothole, i) => {
+            const priorityScore = pothole.hit_count * (pothole.severity_score * 10);
+            const maxSeverity = pothole.severity_score * 10;
+            return (
+              <button
+                key={pothole.pothole_id}
+                onClick={() => handleSelect(pothole.pothole_id, lngLat(pothole))}
+                className={`w-full text-left px-4 py-3 hover:bg-zinc-900 transition-colors ${
+                  selected === pothole.pothole_id ? 'bg-zinc-900' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-zinc-500">#{i + 1}</span>
+                  <span className="text-xs text-zinc-500">{pothole.hit_count} hits</span>
+                </div>
+                <p className="text-sm font-medium text-white mb-2">{pothole.street}</p>
+
+                {/* Priority score — most prominent */}
+                <div className="flex items-baseline gap-1.5 mb-3">
+                  <span className={`text-2xl font-bold tabular-nums ${priorityColor(priorityScore)}`}>
+                    {priorityScore.toFixed(0)}
+                  </span>
+                  <span className="text-xs text-zinc-500">priority score</span>
+                </div>
+
+                {/* Max severity bar */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-zinc-500">Max severity</span>
+                    <span className={`text-xs font-medium tabular-nums ${priorityColor(priorityScore)}`}>
+                      {maxSeverity.toFixed(1)}<span className="text-zinc-600">/10</span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full opacity-25 ${severityBarColor(priorityScore)}`}
+                      style={{ width: `${pothole.severity_score * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </aside>
     </div>
